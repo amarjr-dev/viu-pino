@@ -1,0 +1,36 @@
+# Source files
+src/
+*.ts
+!*.d.ts
+
+# Config files
+tsconfig.json
+tsup.config.ts
+
+# Development
+node_modules/
+*.log
+*.local
+
+# Tests
+test/
+tests/
+*.test.*
+*.spec.*
+__tests__/
+
+# Build artifacts
+*.tsbuildinfo
+
+# Backups
+*.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

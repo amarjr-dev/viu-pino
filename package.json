@@ -1,0 +1,54 @@
+{
+  "name": "viu-pino",
+  "version": "0.0.1",
+  "description": "Pino adapter for Viu logging (Kafka + Loki)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./express": {
+      "import": "./dist/express.js",
+      "require": "./dist/express.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "viu",
+    "logging",
+    "pino",
+    "kafka",
+    "loki",
+    "observability"
+  ],
+  "author": "amar.jr <amarjr.dev@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "pino": "^8.16.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^9.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
