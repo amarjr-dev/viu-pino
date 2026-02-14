@@ -14,22 +14,24 @@
 
 </div>
 
-**Pino adapter for Viu logging (Kafka + Loki)**
+**Pino adapter for Viu logging**
 
 ## ✨ Quer ver logs? → Joga no Viu. Viu?
 
-Viu-pino é uma biblioteca TypeScript/JavaScript que integra o [Pino](https://getpino.io) com Kafka e Loki, oferecendo logging estruturado de alta performance com rastreabilidade completa para aplicações Node.js.
+viu-pino é uma biblioteca TypeScript/JavaScript que integra o [Pino](https://getpino.io) com o sistema Viu, oferecendo dois modos de transporte:
+- **HTTP** (recomendado): Envia logs via API REST
+- **Kafka**: Envia logs diretamente para o Kafka
 
 ### 🚀 Features
 
-- ✅ **Circuit Breaker** - Previne connection storms (5 falhas → 60s timeout)
+- ✅ **Modo HTTP** - Não expõe Kafka, autenticação via API Key
+- ✅ **Modo Kafka** - Para alta performance (legacy)
+- ✅ **Circuit Breaker** - Previne connection storms
 - ✅ **Smart Batching** - 100 logs ou 1000ms (auto-flush)
-- ✅ **Security First** - SASL_SSL por padrão
 - ✅ **Correlation IDs** - Rastreamento de requisições
 - ✅ **Express Middleware** - Integração nativa
 - ✅ **TypeScript** - Type-safe com definições completas
 - ✅ **ESM + CommonJS** - Suporte dual module
-- ✅ **Singleton Pattern** - Gerenciamento simplificado
 - ✅ **Pino Performance** - Ultra-rápido e eficiente
 
 ## 📦 Instalação
@@ -46,17 +48,17 @@ bun add viu-pino
 
 ## 🎯 Quick Start
 
-### Uso Básico
+### Modo HTTP (Recomendado)
 
 ```typescript
-import { ViuPino } from 'viu-pino';
+import { ViuPino, TransportMode } from 'viu-pino';
 
-// Configuração para desenvolvimento (sem autenticação)
-const logger = ViuPino.getInstance({
+const logger = new ViuPino({
   serviceName: 'my-api',
-  environment: 'development',
-  kafkaBrokers: 'localhost:9092',
-  kafkaTopic: 'logs.app.raw',
+  environment: 'production',
+  transportMode: TransportMode.HTTP,
+  apiUrl: 'http://localhost:3000',  // URL do backend VIU
+  apiKey: 'viu_live_xxx',           // Gere no dashboard
 });
 
 await logger.initialize();
@@ -64,23 +66,21 @@ await logger.initialize();
 // Logging estruturado
 logger.info('User logged in', { userId: '123', ip: '192.168.1.1' });
 logger.error('Payment failed', new Error('Insufficient funds'), { amount: 99.90 });
-logger.warn('High memory usage', { memoryPercent: 85.5 });
 ```
 
-### 🔐 Produção com Autenticação SASL
+### Modo Kafka (Legacy/Alternativo)
 
 ```typescript
-import { ViuPino } from 'viu-pino';
+import { ViuPino, TransportMode } from 'viu-pino';
 
-const logger = ViuPino.getInstance({
+const logger = new ViuPino({
   serviceName: 'my-api',
   environment: 'production',
-  kafkaBrokers: 'viu-kafka.example.com:9092',
-  kafkaTopic: 'logs.production',
-  kafkaUsername: 'viu_tenant123abc',
-  kafkaPassword: 'your-secure-password',
-  kafkaSaslMechanism: 'scram-sha-256',
-  kafkaSecurityProtocol: 'SASL_SSL', // Default!
+  transportMode: TransportMode.KAFKA,
+  kafkaBrokers: 'kafka.example.com:9092',
+  kafkaTopic: 'logs.tenant-id',
+  kafkaUsername: 'tenant_user',
+  kafkaPassword: 'secure-password',
 });
 
 await logger.initialize();
@@ -88,30 +88,40 @@ await logger.initialize();
 logger.info('Application started', { version: '1.2.3' });
 ```
 
+### 🔐 Produção com Autenticação SASL
+
+```typescript
+import { ViuPino, TransportMode } from 'viu-pino';
+
+const logger = new ViuPino({
+  serviceName: 'my-api',
+  environment: 'production',
+  transportMode: TransportMode.KAFKA,
+  kafkaBrokers: 'viu-kafka.example.com:9092',
+  kafkaTopic: 'logs.production',
+  kafkaUsername: 'viu_tenant123abc',
+  kafkaPassword: 'your-secure-password',
+  kafkaSaslMechanism: 'scram-sha-256',
+  kafkaSecurityProtocol: 'SASL_SSL',
+});
+```
+
 ### 🌍 Configuração via Environment Variables
 
 ```bash
+# Modo HTTP
+export VIU_TRANSPORT_MODE=http
 export VIU_SERVICE_NAME=my-api
 export VIU_ENVIRONMENT=production
-export VIU_KAFKA_BROKERS=viu-kafka.example.com:9092
+export VIU_API_URL=http://localhost:3000
+export VIU_API_KEY=viu_live_xxx
+
+# Modo Kafka
+export VIU_TRANSPORT_MODE=kafka
+export VIU_KAFKA_BROKERS=kafka.example.com:9092
 export VIU_KAFKA_TOPIC=logs.production
 export VIU_KAFKA_USERNAME=viu_tenant123abc
 export VIU_KAFKA_PASSWORD=your-secure-password
-export VIU_KAFKA_SASL_MECHANISM=scram-sha-256
-export VIU_KAFKA_SECURITY_PROTOCOL=SASL_SSL
-```
-
-```typescript
-import { ViuPino } from 'viu-pino';
-
-const logger = ViuPino.getInstance({
-  serviceName: process.env.VIU_SERVICE_NAME!,
-  environment: process.env.VIU_ENVIRONMENT,
-  kafkaBrokers: process.env.VIU_KAFKA_BROKERS,
-  kafkaTopic: process.env.VIU_KAFKA_TOPIC,
-  kafkaUsername: process.env.VIU_KAFKA_USERNAME,
-  kafkaPassword: process.env.VIU_KAFKA_PASSWORD,
-});
 ```
 
 ### 🔄 Integração com Express
@@ -119,24 +129,27 @@ const logger = ViuPino.getInstance({
 ```typescript
 import express from 'express';
 import { viuCorrelationMiddleware } from 'viu-pino/express';
-import { ViuPino } from 'viu-pino';
+import { ViuPino, TransportMode } from 'viu-pino';
 
 const app = express();
 
-// Adicionar middleware para correlation IDs
+// Middleware para correlation IDs
 app.use(viuCorrelationMiddleware({
   serviceName: 'my-api',
   environment: 'production',
-  kafkaBrokers: 'kafka.example.com:9092',
-  kafkaUsername: 'user',
-  kafkaPassword: 'pass',
+  transportMode: TransportMode.HTTP,
+  apiUrl: 'http://localhost:3000',
+  apiKey: 'viu_live_xxx',
 }));
 
-// Logger
-const logger = ViuPino.getInstance();
+const logger = new ViuPino({
+  serviceName: 'my-api',
+  transportMode: TransportMode.HTTP,
+  apiUrl: 'http://localhost:3000',
+  apiKey: 'viu_live_xxx',
+});
 
-app.get('/users/:id', (req, res) => {
-  // Correlation ID já está setado pelo middleware
+app.get('/users/:id', async (req, res) => {
   logger.info('Fetching user', { userId: req.params.id });
   res.json({ id: req.params.id });
 });
@@ -146,113 +159,44 @@ app.listen(3000, () => {
 });
 ```
 
-### 📊 Logging Estruturado Avançado
-
-```typescript
-// Contexto rico
-logger.info('User action completed', {
-  userId: 'user_123',
-  action: 'purchase',
-  productId: 'prod_456',
-  amount: 149.99,
-  currency: 'USD',
-  paymentMethod: 'credit_card',
-  durationMs: 234,
-});
-
-// Tratamento de exceções
-try {
-  const result = await riskyOperation();
-} catch (error) {
-  logger.error('Operation failed', error as Error, {
-    operation: 'riskyOperation',
-    attemptNumber: 3,
-  });
-}
-```
-
-### 🔍 Correlation IDs e Rastreamento
-
-```typescript
-import { ViuPino } from 'viu-pino';
-
-// Definir correlation ID manualmente
-ViuPino.correlationId = 'request-123-abc';
-ViuPino.traceId = 'trace-456-def';
-ViuPino.spanId = 'span-789-ghi';
-
-logger.info('Processing request'); // Inclui IDs automaticamente
-
-// Resetar
-ViuPino.resetInstance();
-```
-
-### 🔧 Customização com Pino Child Logger
-
-```typescript
-// Criar child logger com contexto fixo
-const userLogger = logger.child({ module: 'user-service' });
-
-userLogger.info('User created', { userId: '123' });
-// Log terá: { module: 'user-service', userId: '123' }
-```
-
 ## ⚙️ Configuração
 
 | Opção | Tipo | Descrição | Padrão |
 |-------|------|-----------|--------|
 | `serviceName` | string | Nome do serviço | (obrigatório) |
 | `environment` | string | Ambiente | `'development'` |
+| `transportMode` | `'http' \| 'kafka'` | Modo de transporte | `'http'` |
+| `apiUrl` | string | URL da API (HTTP mode) | undefined |
+| `apiKey` | string | API Key (HTTP mode) | undefined |
 | `kafkaBrokers` | string | Endereço Kafka | `'localhost:9092'` |
 | `kafkaTopic` | string | Topic Kafka | `'logs.app.raw'` |
-| `kafkaUsername` | string | Username SASL | `undefined` |
-| `kafkaPassword` | string | Password SASL | `undefined` |
+| `kafkaUsername` | string | Username SASL | undefined |
+| `kafkaPassword` | string | Password SASL | undefined |
 | `kafkaSaslMechanism` | string | Mecanismo SASL | `'scram-sha-256'` |
 | `kafkaSecurityProtocol` | string | Protocolo | `'SASL_SSL'` |
 | `level` | string | Nível do log | `'info'` |
-| `prettyPrint` | boolean | Pretty print | `false` |
 | `batchSize` | number | Tamanho do batch | `100` |
 | `batchTimeout` | number | Timeout do batch (ms) | `1000` |
 
-## 🧪 Testes
-
-```bash
-# Instalar dependências
-npm install
-
-# Rodar testes
-npm test
-
-# Testes com watch
-npm run test:watch
-
-# Com cobertura
-npm run test:coverage
-
-# Build
-npm run build
-```
-
 ## 📈 Performance
 
-- **Batching**: Agrupa até 100 logs ou 1000ms antes de enviar
-- **Auto-flush**: Flush automático ao atingir batch size
+- **Modo HTTP**: Envio imediato, retry automático
+- **Modo Kafka**: Batching (100 logs ou 1000ms), compressão gzip
 - **Circuit Breaker**: Evita sobrecarga em falhas
 - **Pino**: Um dos loggers mais rápidos do Node.js
-- **Compression**: Suporte gzip via KafkaJS
 
 ## 🔒 Segurança
 
-- SASL_SSL ativado por padrão
-- Credenciais nunca aparecem nos logs
+- **Modo HTTP**: API Key no header Authorization
+- **Modo Kafka**: SASL_SSL ativado por padrão
 - Suporte TLS/SSL completo
-- Opções de autenticação: SCRAM-SHA-256, SCRAM-SHA-512, PLAIN
+- Autenticação: SCRAM-SHA-256, SCRAM-SHA-512, PLAIN
 
 ## 📦 Exports
 
 ```typescript
 // Main export
-import { ViuPino, ViuPinoConfig, createViuPino } from 'viu-pino';
+import { ViuPino, ViuPinoConfig, TransportMode, createViuPino } from 'viu-pino';
 
 // Express middleware
 import { 
@@ -263,33 +207,26 @@ import {
 } from 'viu-pino/express';
 ```
 
-## 🆚 ESM vs CommonJS
+## 🆚 HTTP vs Kafka
 
-```typescript
-// ESM
-import { ViuPino } from 'viu-pino';
-
-// CommonJS
-const { ViuPino } = require('viu-pino');
-```
+| Aspecto | HTTP | Kafka |
+|---------|------|-------|
+| Complexidade | Baixa | Alta |
+| Exposição Kafka | Não | Sim |
+| Autenticação | API Key | SASL |
+| Performance | Boa | Excelente |
+| Recomendado | Padrão | Alta performance |
 
 ## 🤝 Contributing
 
-Contribuições são bem-vindas! Veja [CONTRIBUTING.md](../../CONTRIBUTING.md).
+Contribuições são bem-vindas!
 
 ## 📄 License
 
-MIT License - veja [LICENSE](LICENSE) para detalhes.
-
-## 🔗 Links
-
-- [Documentação](https://github.com/viu-team/viu/tree/main/sdks-monorepo/packages/viu-pino)
-- [Issues](https://github.com/viu-team/viu/issues)
-- [NPM](https://www.npmjs.com/package/viu-pino)
-- [Changelog](CHANGELOG.md)
+MIT License - see [LICENSE](LICENSE) para detalhes.
 
 ---
 
 <div align="center">
-  <sub>Built with ❤️ by Viu Team - @mar.jr</sub>
+  <sub>Built with ❤️ by @mar.jr</sub>
 </div>
