@@ -1,16 +1,32 @@
 import pino, { Logger } from 'pino';
 import { Kafka, Producer, CompressionTypes } from 'kafkajs';
 import { v4 as uuidv4 } from 'uuid';
+import http from 'http';
+import https from 'https';
+
+export type TransportMode = 'http' | 'kafka';
 
 export interface ViuPinoConfig {
   serviceName: string;
   environment?: string;
+  
+  // Transport mode (http or kafka)
+  transportMode?: TransportMode;
+  
+  // HTTP config (for transportMode: 'http')
+  apiUrl?: string;
+  apiKey?: string;
+  httpTimeout?: number;
+  
+  // Kafka config (for transportMode: 'kafka')
   kafkaBrokers?: string;
   kafkaTopic?: string;
   kafkaUsername?: string;
   kafkaPassword?: string;
   kafkaSaslMechanism?: 'scram-sha-256' | 'scram-sha-512' | 'plain';
   kafkaSecurityProtocol?: 'SASL_SSL' | 'SASL_PLAINTEXT';
+  
+  // Common options
   level?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
   prettyPrint?: boolean;
   batchSize?: number;
@@ -52,7 +68,97 @@ class CircuitBreaker {
       return false;
     }
     
-    return true; // half-open
+    return true;
+  }
+}
+
+class HTTPClient {
+  private apiUrl: string;
+  private apiKey: string;
+  private timeout: number;
+  
+  constructor(apiUrl: string, apiKey: string, timeout: number = 10000) {
+    this.apiUrl = apiUrl.replace(/\/$/, '');
+    this.apiKey = apiKey;
+    this.timeout = timeout;
+  }
+  
+  async send(logEntry: Record<string, unknown>): Promise<boolean> {
+    return new Promise((resolve) => {
+      const url = new URL('/api/v1/logs', this.apiUrl);
+      const isHttps = url.protocol === 'https:';
+      const client = isHttps ? https : http;
+      
+      const data = JSON.stringify(logEntry);
+      
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `ApiKey ${this.apiKey}`,
+          'Content-Length': Buffer.byteLength(data),
+        },
+        timeout: this.timeout,
+      };
+      
+      const req = client.request(options, (res) => {
+        res.on('data', () => {});
+        res.on('end', () => {
+          resolve(res.statusCode !== undefined && res.statusCode < 400);
+        });
+      });
+      
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      
+      req.write(data);
+      req.end();
+    });
+  }
+  
+  async sendBatch(logEntries: Record<string, unknown>[]): Promise<boolean> {
+    return new Promise((resolve) => {
+      const url = new URL('/api/v1/logs', this.apiUrl);
+      const isHttps = url.protocol === 'https:';
+      const client = isHttps ? https : http;
+      
+      const data = JSON.stringify(logEntries);
+      
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `ApiKey ${this.apiKey}`,
+          'Content-Length': Buffer.byteLength(data),
+        },
+        timeout: this.timeout,
+      };
+      
+      const req = client.request(options, (res) => {
+        res.on('data', () => {});
+        res.on('end', () => {
+          resolve(res.statusCode !== undefined && res.statusCode < 400);
+        });
+      });
+      
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      
+      req.write(data);
+      req.end();
+    });
   }
 }
 
@@ -60,11 +166,13 @@ export class ViuPino {
   private logger: Logger;
   private producer: Producer | null = null;
   private kafka: Kafka | null = null;
+  private httpClient: HTTPClient | null = null;
   private config: Required<ViuPinoConfig>;
   private initialized = false;
   private batch: Array<{ value: string }> = [];
   private batchTimer: NodeJS.Timeout | null = null;
   private circuitBreaker: CircuitBreaker;
+  private transportMode: TransportMode = 'http';
 
   private static _instance: ViuPino | null = null;
   private static _correlationId: string | null = null;
@@ -74,6 +182,10 @@ export class ViuPino {
   constructor(config: ViuPinoConfig) {
     this.config = {
       environment: 'development',
+      transportMode: 'http',
+      apiUrl: '',
+      apiKey: '',
+      httpTimeout: 10000,
       kafkaBrokers: 'localhost:9092',
       kafkaTopic: 'logs.app.raw',
       kafkaSaslMechanism: 'scram-sha-256',
@@ -85,6 +197,7 @@ export class ViuPino {
       ...config,
     } as Required<ViuPinoConfig>;
 
+    this.transportMode = this.config.transportMode || 'http';
     this.circuitBreaker = new CircuitBreaker();
 
     this.logger = pino({
@@ -144,38 +257,52 @@ export class ViuPino {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    const kafkaConfig: ConstructorParameters<typeof Kafka>[0] = {
-      clientId: this.config.serviceName,
-      brokers: [this.config.kafkaBrokers],
-      retry: {
-        initialRetryTime: 300,
-        retries: 8,
-        multiplier: 2,
-      },
-    };
-
-    if (this.config.kafkaUsername && this.config.kafkaPassword) {
-      kafkaConfig.sasl = {
-        mechanism: this.config.kafkaSaslMechanism as any,
-        username: this.config.kafkaUsername,
-        password: this.config.kafkaPassword,
+    if (this.transportMode === 'http') {
+      // HTTP mode
+      if (!this.config.apiUrl || !this.config.apiKey) {
+        throw new Error('API URL and API Key are required for HTTP mode');
+      }
+      this.httpClient = new HTTPClient(
+        this.config.apiUrl,
+        this.config.apiKey,
+        this.config.httpTimeout
+      );
+    } else {
+      // Kafka mode (legacy)
+      const kafkaConfig: ConstructorParameters<typeof Kafka>[0] = {
+        clientId: this.config.serviceName,
+        brokers: [this.config.kafkaBrokers],
+        retry: {
+          initialRetryTime: 300,
+          retries: 8,
+          multiplier: 2,
+        },
       };
-      kafkaConfig.ssl = this.config.kafkaSecurityProtocol === 'SASL_SSL';
+
+      if (this.config.kafkaUsername && this.config.kafkaPassword) {
+        kafkaConfig.sasl = {
+          mechanism: this.config.kafkaSaslMechanism as any,
+          username: this.config.kafkaUsername,
+          password: this.config.kafkaPassword,
+        };
+        kafkaConfig.ssl = this.config.kafkaSecurityProtocol === 'SASL_SSL';
+      }
+
+      this.kafka = new Kafka(kafkaConfig);
+      this.producer = this.kafka.producer({
+        allowAutoTopicCreation: false,
+      });
+
+      try {
+        await this.producer.connect();
+        this.circuitBreaker.recordSuccess();
+      } catch (error) {
+        this.circuitBreaker.recordFailure();
+        throw error;
+      }
     }
 
-    this.kafka = new Kafka(kafkaConfig);
-    this.producer = this.kafka.producer({
-      allowAutoTopicCreation: false,
-    });
-
-    try {
-      await this.producer.connect();
-      this.initialized = true;
-      this.circuitBreaker.recordSuccess();
-    } catch (error) {
-      this.circuitBreaker.recordFailure();
-      throw error;
-    }
+    this.initialized = true;
   }
 
   private createLogEntry(
@@ -202,8 +329,15 @@ export class ViuPino {
 
   private async flushBatch(): Promise<void> {
     if (this.batch.length === 0) return;
+
+    if (this.transportMode === 'http') {
+      // HTTP mode - não usa batch para simplificar
+      this.batch = [];
+      return;
+    }
+
+    // Kafka mode
     if (!this.circuitBreaker.canAttempt()) {
-      // Circuit breaker open - fallback para console
       this.batch.forEach(msg => console.log(msg.value));
       this.batch = [];
       return;
@@ -231,15 +365,25 @@ export class ViuPino {
     }
   }
 
-  private async sendToKafka(logEntry: object): Promise<void> {
+  private async sendLog(logEntry: Record<string, unknown>): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
     }
 
+    if (this.transportMode === 'http' && this.httpClient) {
+      // HTTP mode - send directly
+      try {
+        await this.httpClient.send(logEntry);
+      } catch (error) {
+        console.error('Failed to send log via HTTP:', error);
+      }
+      return;
+    }
+
+    // Kafka mode
     const message = { value: JSON.stringify(logEntry) };
     this.batch.push(message);
 
-    // Auto-flush se atingir batch size
     if (this.batch.length >= this.config.batchSize) {
       if (this.batchTimer) {
         clearTimeout(this.batchTimer);
@@ -247,7 +391,6 @@ export class ViuPino {
       }
       await this.flushBatch();
     } else if (!this.batchTimer) {
-      // Configura timer para flush automático
       this.batchTimer = setTimeout(() => {
         this.batchTimer = null;
         this.flushBatch().catch(() => {});
@@ -276,7 +419,7 @@ export class ViuPino {
       });
     }
 
-    await this.sendToKafka(logEntry);
+    await this.sendLog(logEntry as Record<string, unknown>);
   }
 
   async trace(message: string, context?: Record<string, unknown>): Promise<void> {
@@ -317,12 +460,15 @@ export class ViuPino {
       this.batchTimer = null;
     }
 
-    await this.flushBatch();
+    if (this.transportMode === 'kafka') {
+      await this.flushBatch();
 
-    if (this.producer) {
-      await this.producer.disconnect();
-      this.producer = null;
+      if (this.producer) {
+        await this.producer.disconnect();
+        this.producer = null;
+      }
     }
+
     this.initialized = false;
   }
 
