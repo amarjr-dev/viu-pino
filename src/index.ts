@@ -6,6 +6,12 @@ import https from 'https';
 
 export type TransportMode = 'http' | 'kafka';
 
+import { 
+  detectTraceHeaders, 
+  setCorrelationId, 
+  setTraceContext,
+} from './trace-headers';
+
 export interface ViuPinoConfig {
   serviceName: string;
   environment?: string;
@@ -308,11 +314,48 @@ export class ViuPino {
   private createLogEntry(
     level: string,
     message: string,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
+    appStack?: string
   ): object {
-    const correlationId = ViuPino._correlationId || uuidv4();
-    const traceId = ViuPino._traceId || correlationId;
-    const spanId = ViuPino._spanId;
+    // Auto-gerar e persistir correlation_id
+    const correlationId = ViuPino._correlationId || (() => {
+      const id = uuidv4();
+      ViuPino._correlationId = id;
+      return id;
+    })();
+
+    // Auto-gerar e persistir trace_id (fallback para correlation_id)
+    const traceId = ViuPino._traceId || (() => {
+      const id = correlationId;
+      ViuPino._traceId = id;
+      return id;
+    })();
+
+    // Auto-gerar e persistir span_id (16 chars)
+    const spanId = ViuPino._spanId || (() => {
+      const id = uuidv4().slice(0, 16);
+      ViuPino._spanId = id;
+      return id;
+    })();
+
+    const stack = appStack || new Error().stack;
+    let module = '';
+    let file = '';
+    let line = 0;
+
+    if (stack) {
+      const lines = stack.split('\n');
+      for (const lineInfo of lines) {
+        const match = lineInfo.match(/at\s+(?:.*\s+)?\(?(.+):(\d+):\d+\)?/);
+        if (match && !lineInfo.includes('ViuPino') && !lineInfo.includes('createLogEntry') && !lineInfo.includes('at log ') && !lineInfo.includes('processTicksAndRejections')) {
+          file = match[1];
+          line = parseInt(match[2], 10);
+          const fileParts = file.split('/');
+          module = fileParts[fileParts.length - 1].replace('.ts', '').replace('.js', '');
+          break;
+        }
+      }
+    }
 
     return {
       timestamp: new Date().toISOString(),
@@ -323,7 +366,14 @@ export class ViuPino {
       correlation_id: correlationId,
       trace_id: traceId,
       span_id: spanId,
-      context: context || {},
+      module,
+      file,
+      line,
+      context: context
+        ? Object.fromEntries(
+            Object.entries(context).filter(([_, v]) => v !== null && v !== undefined)
+          )
+        : {},
     };
   }
 
@@ -403,7 +453,8 @@ export class ViuPino {
     message: string,
     context?: Record<string, unknown>
   ): Promise<void> {
-    const logEntry = this.createLogEntry(level, message, context);
+    const appStack = new Error().stack;
+    const logEntry = this.createLogEntry(level, message, context, appStack);
 
     const pinoLogMethod = this.logger[level as keyof typeof this.logger] as (
       msg: string,
@@ -452,6 +503,23 @@ export class ViuPino {
 
   async fatal(message: string, context?: Record<string, unknown>): Promise<void> {
     await this.log('fatal', message, context);
+  }
+
+  setTraceHeaders(headers: Record<string, string>): void {
+    /**
+     * Define headers de tracing para a requisição atual
+     * 
+     * @param headers - Objeto com headers HTTP (case-insensitive)
+     *                  Ex: {'X-Correlation-ID': 'req-123', 'traceparent': '00-xxx-yyy-01'}
+     */
+    const traceInfo = detectTraceHeaders(headers);
+    
+    if (traceInfo.correlationId) {
+      setCorrelationId(traceInfo.correlationId);
+    }
+    if (traceInfo.traceId) {
+      setTraceContext(traceInfo.traceId, traceInfo.spanId);
+    }
   }
 
   async close(): Promise<void> {

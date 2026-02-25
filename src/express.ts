@@ -11,7 +11,7 @@ export function viuCorrelationMiddleware(
 ) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const correlationId = req.headers['x-correlation-id'] as string || uuidv4();
-    const traceId = uuidv4();
+    const traceId = correlationId;  // Reusa correlation_id como trace_id
     const spanId = uuidv4().slice(0, 16);
 
     ViuPino.correlationId = correlationId;
