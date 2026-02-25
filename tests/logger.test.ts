@@ -1,6 +1,6 @@
-"""
-Test logger functionality
-"""
+/**
+ * Test logger functionality
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ViuPino, ViuPinoConfig } from '../src/index';
 

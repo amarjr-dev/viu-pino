@@ -1,6 +1,6 @@
-"""
-Test configuration for ViuPino
-"""
+/**
+ * Test configuration for ViuPino
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ViuPino, ViuPinoConfig } from '../src/index';
 
