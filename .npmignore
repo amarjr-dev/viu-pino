@@ -25,6 +25,13 @@ __tests__/
 # Backups
 *.bak
 
+# Temporary test scripts
+test_fix.ts
+test_*.ts
+
+# Package tarballs
+*.tgz
+
 # IDE
 .vscode/
 .idea/

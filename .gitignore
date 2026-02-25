@@ -29,3 +29,11 @@ coverage/
 
 # Backups
 *.bak
+
+# Temporary test scripts
+test_fix.ts
+test_*.ts
+!tests/**/*.ts
+
+# Package tarballs
+*.tgz
