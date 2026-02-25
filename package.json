@@ -1,6 +1,6 @@
 {
   "name": "viu-pino",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Pino adapter for Viu logging (Kafka + Loki + HTTP API)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
