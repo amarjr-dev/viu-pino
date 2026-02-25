@@ -88,6 +88,113 @@ await logger.initialize();
 logger.info('Application started', { version: '1.2.3' });
 ```
 
+## 📝 Exemplos de Uso
+
+### Níveis de Log
+
+#### INFO - Sem contexto
+```typescript
+await logger.info('Application started');
+await logger.info('User logged in successfully');
+await logger.info('Database connection established');
+```
+
+#### INFO - Com contexto
+```typescript
+await logger.info('User logged in', { 
+  userId: '123', 
+  email: 'user@example.com',
+  loginMethod: 'oauth'
+});
+
+await logger.info('Request processed', {
+  method: 'GET',
+  path: '/api/users',
+  responseTime: 45,
+  statusCode: 200
+});
+```
+
+#### ERROR - Sem contexto (apenas mensagem)
+```typescript
+await logger.error('Something went wrong');
+await logger.error('Database connection failed');
+```
+
+#### ERROR - Com objeto Error
+```typescript
+try {
+  await processPayment(order);
+} catch (err) {
+  await logger.error('Payment processing failed', err as Error);
+}
+```
+
+#### ERROR - Com Error + contexto adicional
+```typescript
+try {
+  await processPayment(order);
+} catch (err) {
+  await logger.error('Payment processing failed', err as Error, {
+    orderId: order.id,
+    amount: order.total,
+    currency: 'BRL',
+    userId: order.userId
+  });
+}
+```
+
+#### WARNING - Sem contexto
+```typescript
+await logger.warn('High memory usage detected');
+await logger.warn('API rate limit approaching');
+```
+
+#### WARNING - Com contexto
+```typescript
+await logger.warn('Slow query detected', {
+  query: 'SELECT * FROM users',
+  duration: 2500,
+  threshold: 1000
+});
+
+await logger.warn('Cache miss', {
+  key: 'user:123',
+  operation: 'getUserProfile',
+  fallback: 'database'
+});
+```
+
+#### DEBUG - Sem contexto
+```typescript
+await logger.debug('Entering authentication flow');
+await logger.debug('Cache lookup performed');
+```
+
+#### DEBUG - Com contexto
+```typescript
+await logger.debug('Processing request', {
+  headers: req.headers,
+  body: req.body,
+  query: req.query
+});
+
+await logger.debug('Database query executed', {
+  sql: 'SELECT * FROM users WHERE id = ?',
+  params: [userId],
+  duration: 12
+});
+```
+
+#### Outros níveis
+```typescript
+// FATAL - Erros críticos que causam shutdown
+await logger.fatal('Critical system failure', {
+  error: 'Out of memory',
+  freeMemory: 0
+});
+```
+
 ### 🔐 Produção com Autenticação SASL
 
 ```typescript
@@ -148,6 +255,105 @@ const logger = new ViuPino({
   apiUrl: 'http://localhost:3000',
   apiKey: 'viu_live_xxx',
 });
+
+app.get('/users/:id', async (req, res) => {
+  await logger.info('Fetching user', { userId: req.params.id });
+  res.json({ userId: req.params.id });
+});
+```
+
+## 🔗 Rastreamento e Correlation IDs
+
+O viu-pino **gera automaticamente** IDs de rastreamento para todos os logs:
+
+### IDs Gerados Automaticamente
+
+```typescript
+await logger.info('User action', { userId: '123' });
+// Gera automaticamente:
+// - correlation_id: UUID único da requisição
+// - trace_id: UUID para rastreamento distribuído (reutiliza correlation_id)
+// - span_id: UUID (16 chars) para operações individuais
+```
+
+### Ordem de Prioridade para IDs
+
+1. **Explícito via ViuPino setter**: Valor definido manualmente
+2. **Headers HTTP**: Extraído via middleware ou `setTraceHeaders()`
+3. **Auto-geração**: UUID gerado automaticamente (padrão)
+
+### Definir Manualmente
+
+```typescript
+// Definir IDs globalmente
+ViuPino.correlationId = 'custom-correlation-123';
+ViuPino.traceId = 'custom-trace-456';
+ViuPino.spanId = 'custom-span-789';
+
+await logger.info('Operation with custom IDs');
+```
+
+### Detecção Automática de Headers HTTP
+
+```typescript
+import { detectTraceHeaders } from 'viu-pino';
+
+// Headers W3C Trace Context ou Zipkin B3 são detectados automaticamente
+const headers = req.headers;
+const traceInfo = detectTraceHeaders(headers);
+
+if (traceInfo.correlationId) {
+  ViuPino.correlationId = traceInfo.correlationId;
+}
+if (traceInfo.traceId) {
+  ViuPino.traceId = traceInfo.traceId;
+}
+if (traceInfo.spanId) {
+  ViuPino.spanId = traceInfo.spanId;
+}
+
+// Ou use o método helper
+logger.setTraceHeaders(req.headers);
+```
+
+### Persistência de IDs
+
+IDs gerados automaticamente são **persistidos** e reutilizados entre logs:
+
+```typescript
+const logger = new ViuPino({ /* config */ });
+
+await logger.info('First log');   // Gera IDs
+await logger.info('Second log');  // Reutiliza IDs
+await logger.info('Third log');   // Reutiliza IDs
+
+// Todos os 3 logs compartilham os mesmos correlation_id, trace_id, span_id
+```
+
+Para resetar e gerar novos IDs:
+
+```typescript
+ViuPino.resetInstance();
+// Próximos logs terão novos IDs
+```
+
+### Filtragem de Context
+
+Valores `null` e `undefined` são **automaticamente removidos** do contexto:
+
+```typescript
+await logger.info('User event', {
+  userId: '123',
+  email: null,        // ← Removido
+  name: 'John Doe',
+  age: undefined,     // ← Removido
+  status: 'active',
+});
+
+// Context enviado: { userId: '123', name: 'John Doe', status: 'active' }
+```
+
+**Compatibilidade**: W3C Trace Context, Zipkin B3, OpenTelemetry
 
 app.get('/users/:id', async (req, res) => {
   logger.info('Fetching user', { userId: req.params.id });

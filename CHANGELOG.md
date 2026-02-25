@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-02-25
+
+### Added
+- Auto-geração de `span_id` quando não fornecido manualmente (16 caracteres hex)
+- `span_id` agora é sempre incluído nos logs
+- Persistência de IDs gerados automaticamente no contexto global
+- Filtragem automática de valores `null`/`undefined` do campo `context`
+
+### Changed
+- `trace_id` agora usa `correlation_id` como fallback (antes gerava UUID aleatório)
+- Middleware Express: `trace_id` reutiliza `correlation_id` por padrão
+- IDs gerados automaticamente (`correlation_id`, `trace_id`, `span_id`) são mantidos entre chamadas de log
+
+### Fixed
+- IDs gerados automaticamente agora são persistidos no contexto e reutilizados
+- Context não envia mais valores nulos/indefinidos ao backend
+- `span_id` nunca mais será `null` nos logs
+- `trace_id` agora segue o padrão de distributed tracing (fallback para `correlation_id`)
+
+## [0.1.4] - 2026-02-15
+
+### Fixed
+- Captura de module, file e line agora captura corretamente da aplicação, não do SDK
+- Stack trace é capturado no método `log` antes de chamar `createLogEntry`
+
+## [0.1.3] - 2026-02-15
+
+### Added
+- Auto-detecção de trace headers (correlation_id, trace_id, span_id)
+- Captura automática de module, file e line via stack trace
+- Envio de campos extras (module, file, line) para o backend
+
+### Fixed
+- SDK agora envia correlation_id, trace_id, span_id automaticamente
+
 ## [0.1.2] - 2026-02-14
 
 ### Fixed
